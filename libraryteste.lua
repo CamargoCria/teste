@@ -1,5 +1,4 @@
--- libraryteste.lua (VERSÃO CORRIGIDA)
--- UI com blur/sombra/glow e layout corrigido (controles maiores, full-width)
+-- libraryteste.lua (CORRIGIDA: abas, dropdown flutuante, layout full-width)
 -- Retorna: library, menu (ScreenGui), tabholder (Frame)
 
 local CoreGui = game:GetService("CoreGui")
@@ -15,7 +14,8 @@ local library = {
     flags = {},
     options = {},
     libColor = Color3.fromRGB(0,140,255),
-    Open = true
+    Open = true,
+    _dropdowns = {} -- track overlays to close when switching tabs
 }
 
 -- Theme
@@ -29,17 +29,17 @@ local TEXT_MUTED       = Color3.fromRGB(170,170,170)
 local HOVER_COLOR      = Color3.fromRGB(50,50,56)
 local CORNER_RADIUS    = UDim.new(0,8)
 
--- cleanup old
+-- Cleanup old gui & blur
 pcall(function() if CoreGui:FindFirstChild("sjorlib") then CoreGui.sjorlib:Destroy() end end)
 pcall(function() if Lighting:FindFirstChild("AloraBlur") then Lighting.AloraBlur:Destroy() end end)
 
--- blur
+-- Blur
 local blur = Instance.new("BlurEffect")
 blur.Name = "AloraBlur"
 blur.Size = 10
 blur.Parent = Lighting
 
--- screen gui (must be 'sjorlib' for your script check)
+-- ScreenGui (must be sjorlib for Alora script check)
 local menu = Instance.new("ScreenGui")
 menu.Name = "sjorlib"
 menu.Parent = CoreGui
@@ -47,16 +47,16 @@ menu.ResetOnSpawn = false
 menu.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 menu.Enabled = true
 
--- shadow
+-- Shadow
 local shadow = Instance.new("Frame", menu)
 shadow.Name = "ShadowFrame"
 shadow.BackgroundColor3 = Color3.new(0,0,0)
 shadow.BackgroundTransparency = 0.7
 shadow.Size = UDim2.new(0, 720, 0, 460)
 shadow.Position = UDim2.new(0.5, -360 + 6, 0.5, -230 + 6)
-local sc = Instance.new("UICorner", shadow); sc.CornerRadius = CORNER_RADIUS
+local shc = Instance.new("UICorner", shadow); shc.CornerRadius = CORNER_RADIUS
 
--- main window
+-- Main window
 local main = Instance.new("Frame", menu)
 main.Name = "MainFrame"
 main.BackgroundColor3 = MAIN_BG_COLOR
@@ -69,7 +69,7 @@ glow.Color = BORDER_COLOR
 glow.Transparency = BORDER_TRANSP
 glow.Thickness = 2
 
--- titlebar
+-- Titlebar
 local titleBar = Instance.new("Frame", main)
 titleBar.Name = "TitleBar"
 titleBar.BackgroundColor3 = Color3.fromRGB(20,20,25)
@@ -87,7 +87,7 @@ titleLabel.TextSize = 16
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local closeBtn = Instance.new("TextButton", titleBar)
-closeBtn.Size = UDim2.new(0, 44, 1, 0)
+closeBtn.Size = UDim2.new(0,44,1,0)
 closeBtn.Position = UDim2.new(1,-44,0,0)
 closeBtn.BackgroundTransparency = 1
 closeBtn.Font = Enum.Font.GothamBold
@@ -101,7 +101,7 @@ closeBtn.MouseButton1Click:Connect(function()
     blur.Enabled = false
 end)
 
--- sidebar
+-- Sidebar
 local sidebar = Instance.new("Frame", main)
 sidebar.Name = "SideBar"
 sidebar.BackgroundColor3 = SIDEBAR_BG_COLOR
@@ -113,30 +113,29 @@ sideList.Padding = UDim.new(0,8)
 sideList.SortOrder = Enum.SortOrder.LayoutOrder
 Instance.new("UIPadding", sidebar).PaddingTop = UDim.new(0,8)
 
--- content holder (tab pages)
+-- Tabholder (content pages)
 local tabholder = Instance.new("Frame", main)
 tabholder.Name = "ContentFrame"
 tabholder.BackgroundTransparency = 1
 tabholder.Size = UDim2.new(1, -180, 1, -38)
 tabholder.Position = UDim2.new(0, 180, 0, 38)
 
--- dragging logic
+-- dragging
 do
-    local dragging = false; local dragStart; local startPos
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    local dragging = false; local dragStart; local startPos; local dragInput
+    titleBar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
-            dragStart = input.Position
+            dragStart = i.Position
             startPos = main.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
-    local dragInput
-    titleBar.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement then dragInput = i end end)
+    titleBar.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement then dragInput = i end end)
     UserInputService.InputChanged:Connect(function(i)
-        if dragInput and dragging and i == dragInput then
+        if dragging and i == dragInput then
             local delta = i.Position - dragStart
             local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
             main.Position = newPos
@@ -145,9 +144,9 @@ do
     end)
 end
 
--- toggle menu with Insert
-UserInputService.InputBegan:Connect(function(input, processed)
-    if input.KeyCode == Enum.KeyCode.Insert and not processed then
+-- toggle with Insert
+UserInputService.InputBegan:Connect(function(inp, g)
+    if not g and inp.KeyCode == Enum.KeyCode.Insert then
         library.Open = not library.Open
         menu.Enabled = library.Open
         blur.Enabled = library.Open
@@ -161,21 +160,21 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
--- helper constructors
-local function makeCorner(parent, rad) local c = Instance.new("UICorner", parent); c.CornerRadius = rad or CORNER_RADIUS; return c end
-local function makeLabel(parent, text, size)
-    local l = Instance.new("TextLabel", parent)
+-- helpers
+local function mkCorner(p, r) local c = Instance.new("UICorner", p); c.CornerRadius = r or CORNER_RADIUS; return c end
+local function mkLabel(p, txt, size)
+    local l = Instance.new("TextLabel", p)
     l.BackgroundTransparency = 1
     l.Size = UDim2.new(1, -10, 0, 20)
     l.Font = Enum.Font.Gotham
     l.TextSize = size or 15
     l.TextColor3 = TEXT_COLOR
-    l.Text = text or ""
+    l.Text = txt or ""
     l.TextXAlignment = Enum.TextXAlignment.Left
     return l
 end
 
--- notifier
+-- toast
 local toast = Instance.new("TextLabel", main)
 toast.BackgroundColor3 = Color3.fromRGB(0,0,0)
 toast.BackgroundTransparency = 0.35
@@ -186,26 +185,34 @@ toast.TextColor3 = TEXT_COLOR
 toast.TextSize = 14
 toast.TextXAlignment = Enum.TextXAlignment.Left
 toast.Visible = false
-makeCorner(toast, UDim.new(0,6))
+mkCorner(toast, UDim.new(0,6))
 
-function library:notify(text)
-    if not text then return end
-    toast.Text = "  "..tostring(text)
+function library:notify(txt)
+    if not txt then return end
+    toast.Text = "  "..tostring(txt)
     toast.Visible = true
     toast.TextTransparency = 1
-    for i=0,1,0.1 do toast.TextTransparency = 1 - i; task.wait(0.02) end
+    for i=0,1,0.1 do toast.TextTransparency = 1-i; task.wait(0.02) end
     task.wait(2)
     for i=0,1,0.1 do toast.TextTransparency = i; task.wait(0.02) end
     toast.Visible = false
 end
 
--- Tabs container
-local tabs = {}
+-- tabs storage
+local tabList = {}
 
--- Add tab
+-- close all dropdowns helper
+local function closeAllDropdowns()
+    for _,d in ipairs(library._dropdowns) do
+        if d and d.gui then d.gui.Visible = false end
+        if d and d.runner then pcall(function() d.runner:Disconnect() end) end
+    end
+    library._dropdowns = {}
+end
+
+-- Add Tab
 function library:addTab(name)
-    local btn = Instance.new("TextButton")
-    btn.Parent = sidebar
+    local btn = Instance.new("TextButton", sidebar)
     btn.Size = UDim2.new(1, -12, 0, 40)
     btn.BackgroundColor3 = SIDEBAR_BG_COLOR
     btn.Text = name
@@ -213,65 +220,62 @@ function library:addTab(name)
     btn.TextSize = 15
     btn.TextColor3 = TEXT_MUTED
     btn.AutoButtonColor = false
-    makeCorner(btn, UDim.new(0,6))
+    mkCorner(btn, UDim.new(0,6))
 
-    local page = Instance.new("ScrollingFrame")
+    local page = Instance.new("ScrollingFrame", tabholder)
     page.Name = name.."Page"
-    page.Parent = tabholder
-    page.BackgroundTransparency = 1
     page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
     page.ScrollBarThickness = 8
     page.Visible = false
     page.BorderSizePixel = 0
-
     local list = Instance.new("UIListLayout", page)
     list.Padding = UDim.new(0,10)
     list.SortOrder = Enum.SortOrder.LayoutOrder
-    local pad = Instance.new("UIPadding", page)
-    pad.PaddingTop = UDim.new(0,10)
-    pad.PaddingLeft = UDim.new(0,10)
-    pad.PaddingRight = UDim.new(0,10)
-
-    -- auto canvas size
+    local pPad = Instance.new("UIPadding", page)
+    pPad.PaddingTop = UDim.new(0,10)
+    pPad.PaddingLeft = UDim.new(0,10)
+    pPad.PaddingRight = UDim.new(0,10)
     local function refreshCanvas()
-        page.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 12)
+        page.CanvasSize = UDim2.new(0,0,0,list.AbsoluteContentSize.Y + 12)
     end
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshCanvas)
     page.ChildAdded:Connect(refreshCanvas)
     page.ChildRemoved:Connect(refreshCanvas)
 
+    local tabObj = { button = btn, page = page }
+
     local function activate()
-        for k,v in pairs(tabs) do
-            v.button.BackgroundColor3 = SIDEBAR_BG_COLOR
-            v.button.TextColor3 = TEXT_MUTED
-            v.page.Visible = false
+        closeAllDropdowns()
+        for _,t in ipairs(tabList) do
+            t.button.BackgroundColor3 = SIDEBAR_BG_COLOR
+            t.button.TextColor3 = TEXT_MUTED
+            t.page.Visible = false
         end
         btn.BackgroundColor3 = library.libColor
         btn.TextColor3 = TEXT_COLOR
         page.Visible = true
     end
-
     btn.MouseButton1Click:Connect(activate)
     btn.MouseEnter:Connect(function() if btn.TextColor3 ~= TEXT_COLOR then btn.BackgroundColor3 = HOVER_COLOR end end)
     btn.MouseLeave:Connect(function() if btn.TextColor3 ~= TEXT_COLOR then btn.BackgroundColor3 = SIDEBAR_BG_COLOR end end)
 
-    local tabObj = {button = btn, page = page}
+    table.insert(tabList, tabObj)
+    if #tabList == 1 then activate() end
 
-    function tabObj:createGroup(layoutOrder)
-        local groupFrame = Instance.new("Frame")
-        groupFrame.Parent = page
+    -- createGroup
+    function tabObj:createGroup(order)
+        local groupFrame = Instance.new("Frame", page)
         groupFrame.BackgroundColor3 = SIDEBAR_BG_COLOR
         groupFrame.BorderSizePixel = 0
         groupFrame.AutomaticSize = Enum.AutomaticSize.Y
         groupFrame.Size = UDim2.new(1, 0, 0, 0)
-        groupFrame.LayoutOrder = layoutOrder or 0
-        makeCorner(groupFrame, UDim.new(0,6))
+        groupFrame.LayoutOrder = order or 0
+        mkCorner(groupFrame, UDim.new(0,6))
 
         local gpPad = Instance.new("UIPadding", groupFrame)
-        gpPad.PaddingTop = UDim.new(0,8)
-        gpPad.PaddingBottom = UDim.new(0,8)
-        gpPad.PaddingLeft = UDim.new(0,8)
-        gpPad.PaddingRight = UDim.new(0,8)
+        gpPad.PaddingTop = UDim.new(0,8); gpPad.PaddingBottom = UDim.new(0,8)
+        gpPad.PaddingLeft = UDim.new(0,8); gpPad.PaddingRight = UDim.new(0,8)
 
         local gList = Instance.new("UIListLayout", groupFrame)
         gList.Padding = UDim.new(0,8)
@@ -279,11 +283,11 @@ function library:addTab(name)
 
         local group = {}
 
-        -- addToggle
+        -- Toggle
         function group:addToggle(cfg)
             cfg = cfg or {}
             local flag = cfg.flag or cfg.text
-            if not flag then return warn("addToggle requires flag/text") end
+            assert(flag, "addToggle requires flag/text")
             library.flags[flag] = cfg.value or false
 
             local row = Instance.new("Frame", groupFrame)
@@ -301,9 +305,9 @@ function library:addTab(name)
             box.Size = UDim2.new(0,20,0,20)
             box.Position = UDim2.new(0,6,0.5,-10)
             box.BackgroundColor3 = library.flags[flag] and library.libColor or ELEM_BG_COLOR
-            makeCorner(box, UDim.new(0,4))
+            mkCorner(box, UDim.new(0,4))
 
-            local lbl = makeLabel(btn, cfg.text or flag, 15)
+            local lbl = mkLabel(btn, cfg.text or flag, 15)
             lbl.Position = UDim2.new(0, 32, 0.5, -10)
 
             local function set(v)
@@ -317,7 +321,7 @@ function library:addTab(name)
             return btn
         end
 
-        -- addButton
+        -- Button
         function group:addButton(cfg)
             cfg = cfg or {}
             local b = Instance.new("TextButton", groupFrame)
@@ -328,12 +332,13 @@ function library:addTab(name)
             b.Font = Enum.Font.GothamBold
             b.TextSize = 15
             b.TextColor3 = TEXT_COLOR
-            makeCorner(b, UDim.new(0,6))
+            b.AutoButtonColor = false
+            mkCorner(b, UDim.new(0,6))
             b.MouseButton1Click:Connect(function() if cfg.callback then pcall(cfg.callback) end end)
             return b
         end
 
-        -- addSlider
+        -- Slider
         function group:addSlider(cfg)
             cfg = cfg or {}
             assert(cfg.flag and cfg.min and cfg.max, "addSlider requires flag/min/max")
@@ -344,23 +349,23 @@ function library:addTab(name)
             frame.Size = UDim2.new(1,0,0,52)
             frame.LayoutOrder = cfg.LayoutOrder or 0
 
-            local lbl = makeLabel(frame, (cfg.text or cfg.flag)..": "..tostring(library.flags[cfg.flag]), 14)
+            local lbl = mkLabel(frame, (cfg.text or cfg.flag)..": "..tostring(library.flags[cfg.flag]), 14)
             lbl.Position = UDim2.new(0,0,0,0)
 
             local barBG = Instance.new("Frame", frame)
             barBG.BackgroundColor3 = ELEM_BG_COLOR
             barBG.Size = UDim2.new(1,0,0,12)
             barBG.Position = UDim2.new(0,0,0,34)
-            makeCorner(barBG, UDim.new(1,0))
+            mkCorner(barBG, UDim.new(1,0))
 
             local fill = Instance.new("Frame", barBG)
             fill.BackgroundColor3 = library.libColor
-            fill.Size = UDim2.new( (library.flags[cfg.flag]-cfg.min)/(cfg.max-cfg.min), 0, 1, 0)
-            makeCorner(fill, UDim.new(1,0))
+            fill.Size = UDim2.new((library.flags[cfg.flag]-cfg.min)/(cfg.max-cfg.min),0,1,0)
+            mkCorner(fill, UDim.new(1,0))
 
             local dragging = false
-            barBG.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end end)
-            UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+            barBG.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end end)
+            UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
             RunService.RenderStepped:Connect(function()
                 if dragging then
                     local pct = math.clamp((UserInputService:GetMouseLocation().X - barBG.AbsolutePosition.X)/barBG.AbsoluteSize.X, 0, 1)
@@ -378,7 +383,7 @@ function library:addTab(name)
             return frame
         end
 
-        -- addTextbox
+        -- Textbox
         function group:addTextbox(cfg)
             cfg = cfg or {}
             assert(cfg.flag, "addTextbox requires flag")
@@ -391,7 +396,7 @@ function library:addTab(name)
             tb.TextSize = 15
             tb.TextColor3 = TEXT_COLOR
             tb.ClearTextOnFocus = false
-            makeCorner(tb, UDim.new(0,6))
+            mkCorner(tb, UDim.new(0,6))
             tb.FocusLost:Connect(function(enter)
                 if enter then
                     library.flags[cfg.flag] = tb.Text
@@ -403,7 +408,7 @@ function library:addTab(name)
             return tb
         end
 
-        -- addKeybind
+        -- Keybind
         function group:addKeybind(cfg)
             cfg = cfg or {}
             assert(cfg.flag, "addKeybind requires flag")
@@ -416,7 +421,7 @@ function library:addTab(name)
             b.Font = Enum.Font.Gotham
             b.TextSize = 15
             b.TextColor3 = TEXT_COLOR
-            makeCorner(b, UDim.new(0,6))
+            mkCorner(b, UDim.new(0,6))
 
             local function updateText()
                 local k = library.flags[cfg.flag]
@@ -425,7 +430,7 @@ function library:addTab(name)
             end
             updateText()
 
-            local listening = false; local con
+            local listening=false; local con
             b.MouseButton1Click:Connect(function()
                 if listening then return end
                 listening = true
@@ -445,40 +450,57 @@ function library:addTab(name)
             return b
         end
 
-        -- addList
+        -- LIST (floating dropdown overlay)
         function group:addList(cfg)
             cfg = cfg or {}
             assert(cfg.flag and cfg.values, "addList requires flag and values")
             local multi = cfg.multiselect
             library.flags[cfg.flag] = multi and (cfg.value or {}) or (cfg.value or cfg.values[1])
 
-            local container = Instance.new("Frame", groupFrame)
-            container.BackgroundTransparency = 1
-            container.Size = UDim2.new(1,0,0,36)
-            container.LayoutOrder = cfg.LayoutOrder or 0
+            local holder = Instance.new("Frame", groupFrame)
+            holder.BackgroundTransparency = 1
+            holder.Size = UDim2.new(1,0,0,36)
+            holder.LayoutOrder = cfg.LayoutOrder or 0
 
-            local btn = Instance.new("TextButton", container)
+            local btn = Instance.new("TextButton", holder)
             btn.BackgroundColor3 = ELEM_BG_COLOR
             btn.Size = UDim2.new(1,0,1,0)
             btn.Font = Enum.Font.Gotham
             btn.TextSize = 15
             btn.TextColor3 = TEXT_COLOR
             btn.Text = cfg.text or cfg.flag
-            makeCorner(btn, UDim.new(0,6))
+            btn.AutoButtonColor = false
+            mkCorner(btn, UDim.new(0,6))
 
-            local dd = Instance.new("Frame", btn)
-            dd.Size = UDim2.new(1,0,0,0)
-            dd.Position = UDim2.new(0,0,1,6)
-            dd.BackgroundColor3 = SIDEBAR_BG_COLOR
-            dd.Visible = false
-            dd.ZIndex = 1000
-            local ddList = Instance.new("UIListLayout", dd)
-            ddList.SortOrder = Enum.SortOrder.LayoutOrder
+            -- Create floating overlay (parent menu)
+            local overlay = Instance.new("Frame", menu)
+            overlay.BackgroundColor3 = SIDEBAR_BG_COLOR
+            overlay.Size = UDim2.new(0, 300, 0, 0)
+            overlay.Visible = false
+            overlay.ClipsDescendants = true
+            overlay.ZIndex = 10000
+            mkCorner(overlay, UDim.new(0,6))
+            local overlayList = Instance.new("UIListLayout", overlay)
+            overlayList.Padding = UDim.new(0,0)
+            overlayList.SortOrder = Enum.SortOrder.LayoutOrder
+            overlay.AutomaticSize = Enum.AutomaticSize.Y
+
+            local runnerConn
+            local function updateOverlayPos()
+                local absPos = btn.AbsolutePosition
+                local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800,600)
+                local x = absPos.X
+                local y = absPos.Y + btn.AbsoluteSize.Y + 6
+                -- adjust if overflow right
+                local width = overlay.AbsoluteSize.X
+                if (x + 320) > viewport.X then x = math.max(6, viewport.X - 320 - 6) end
+                overlay.Position = UDim2.new(0, x, 0, y)
+            end
 
             local function build(vals)
-                for _,c in pairs(dd:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+                for _,c in pairs(overlay:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
                 for _,v in ipairs(vals) do
-                    local it = Instance.new("TextButton", dd)
+                    local it = Instance.new("TextButton", overlay)
                     it.Size = UDim2.new(1,0,0,28)
                     it.BackgroundColor3 = SIDEBAR_BG_COLOR
                     it.Text = v
@@ -486,27 +508,65 @@ function library:addTab(name)
                     it.TextSize = 14
                     it.TextColor3 = TEXT_MUTED
                     it.AutoButtonColor = false
+                    it.LayoutOrder = 0
                     it.MouseButton1Click:Connect(function()
                         if multi then
-                            local t = library.flags[cfg.flag]
-                            local idx = table.find(t, v)
-                            if idx then table.remove(t, idx) else table.insert(t, v) end
-                            if cfg.callback then pcall(cfg.callback, t) end
+                            local list = library.flags[cfg.flag]
+                            local idx = table.find(list, v)
+                            if idx then table.remove(list, idx) else table.insert(list, v) end
+                            if cfg.callback then pcall(cfg.callback, list) end
                         else
                             library.flags[cfg.flag] = v
                             if cfg.callback then pcall(cfg.callback, v) end
-                            dd.Visible = false
+                            overlay.Visible = false
                         end
                     end)
                 end
-                dd.Size = UDim2.new(1,0,0,#vals * 28)
             end
-            build(cfg.values)
 
-            btn.MouseButton1Click:Connect(function() dd.Visible = not dd.Visible end)
+            btn.MouseButton1Click:Connect(function()
+                -- close others
+                for _,d in ipairs(library._dropdowns) do if d and d.gui then d.gui.Visible = false; if d.runner then d.runner:Disconnect() end end end
+                library._dropdowns = {}
+
+                build(cfg.values)
+                updateOverlayPos()
+                overlay.Visible = not overlay.Visible
+
+                if overlay.Visible then
+                    -- attach runner to update position while visible
+                    runnerConn = RunService.RenderStepped:Connect(updateOverlayPos)
+                    table.insert(library._dropdowns, {gui = overlay, runner = runnerConn})
+                else
+                    if runnerConn then runnerConn:Disconnect() end
+                end
+            end)
+
+            -- close overlay when clicking outside
+            local inputConn
+            inputConn = UserInputService.InputBegan:Connect(function(input, processed)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    local target = input.Target
+                    if overlay.Visible then
+                        local isDesc = false
+                        if target then
+                            local ins = target
+                            while ins do
+                                if ins == overlay or ins == btn then isDesc = true; break end
+                                ins = ins.Parent
+                            end
+                        end
+                        if not isDesc then
+                            overlay.Visible = false
+                            if runnerConn then pcall(function() runnerConn:Disconnect() end) end
+                        end
+                    end
+                end
+            end)
 
             library.options[cfg.flag] = { type="list", changeState=function(v) library.flags[cfg.flag]=v end, refresh=function(tbl) cfg.values = tbl; build(tbl) end, values=cfg.values, skipflag=cfg.skipflag, oldargs=cfg }
-            return btn, dd
+
+            return btn, overlay
         end
 
         -- addColorpicker (simple)
@@ -515,41 +575,44 @@ function library:addTab(name)
             assert(cfg.flag, "addColorpicker requires flag")
             library.flags[cfg.flag] = cfg.color or Color3.new(1,1,1)
 
-            local container = Instance.new("Frame", groupFrame)
-            container.BackgroundTransparency = 1
-            container.Size = UDim2.new(1,0,0,36)
-            container.LayoutOrder = cfg.LayoutOrder or 0
+            local row = Instance.new("Frame", groupFrame)
+            row.BackgroundTransparency = 1
+            row.Size = UDim2.new(1,0,0,36)
+            row.LayoutOrder = cfg.LayoutOrder or 0
 
-            local preview = Instance.new("TextButton", container)
+            local preview = Instance.new("TextButton", row)
             preview.Size = UDim2.new(0, 40, 0, 28)
             preview.Position = UDim2.new(0, 4, 0, 4)
             preview.BackgroundColor3 = library.flags[cfg.flag]
             preview.Text = ""
             preview.AutoButtonColor = false
-            makeCorner(preview, UDim.new(0,6))
+            mkCorner(preview, UDim.new(0,6))
 
-            local lbl = makeLabel(container, cfg.text or cfg.flag, 15)
+            local lbl = mkLabel(row, cfg.text or cfg.flag, 15)
             lbl.Position = UDim2.new(0, 52, 0, 6)
 
-            local popup = Instance.new("Frame", container)
+            -- We'll implement 3 small sliders inside a floating popup similar to list (for simplicity)
+            local popup = Instance.new("Frame", menu)
             popup.BackgroundColor3 = SIDEBAR_BG_COLOR
-            popup.Size = UDim2.new(0, 260, 0, 110)
-            popup.Position = UDim2.new(0, 120, 0, 0)
+            popup.Size = UDim2.new(0, 300, 0, 110)
             popup.Visible = false
-            makeCorner(popup, UDim.new(0,6))
+            popup.ClipsDescendants = true
+            popup.ZIndex = 10000
+            mkCorner(popup, UDim.new(0,6))
 
             local function mkSlider(name, y, start)
-                local f = Instance.new("Frame", popup)
-                f.BackgroundTransparency = 1
-                f.Size = UDim2.new(1,-12,0,28)
-                f.Position = UDim2.new(0,6,0,(y))
-                local t = makeLabel(f, name, 13); t.Size = UDim2.new(0,28,1,0)
-                local bar = Instance.new("Frame", f)
+                local fr = Instance.new("Frame", popup)
+                fr.BackgroundTransparency = 1
+                fr.Size = UDim2.new(1,-12,0,28)
+                fr.Position = UDim2.new(0,6,0,y)
+                local t = mkLabel(fr, name, 13); t.Size = UDim2.new(0,28,1,0)
+                local bar = Instance.new("Frame", fr)
                 bar.Size = UDim2.new(1,-44,0,10)
                 bar.Position = UDim2.new(0, 34, 0, 8)
-                bar.BackgroundColor3 = ELEM_BG_COLOR; makeCorner(bar,UDim.new(1,0))
-                local fill = Instance.new("Frame", bar); fill.BackgroundColor3 = library.libColor; makeCorner(fill,UDim.new(1,0))
-                fill.Size = UDim2.new(start/255,0,1,0)
+                bar.BackgroundColor3 = ELEM_BG_COLOR; mkCorner(bar, UDim.new(1,0))
+                local fill = Instance.new("Frame", bar)
+                fill.BackgroundColor3 = library.libColor; mkCorner(fill, UDim.new(1,0))
+                fill.Size = UDim2.new(start/255, 0, 1, 0)
                 local dragging=false
                 bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end end)
                 UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
@@ -562,12 +625,19 @@ function library:addTab(name)
                 return function() return math.floor(fill.Size.X.Scale*255) end, function(v) fill.Size = UDim2.new(v/255,0,1,0) end
             end
 
-            local c = library.flags[cfg.flag]
-            local getR,setR = mkSlider("R", 6, c.R*255)
-            local getG,setG = mkSlider("G", 40, c.G*255)
-            local getB,setB = mkSlider("B", 74, c.B*255)
+            local col = library.flags[cfg.flag]
+            local getR,setR = mkSlider("R", 6, col.R*255)
+            local getG,setG = mkSlider("G", 40, col.G*255)
+            local getB,setB = mkSlider("B", 74, col.B*255)
 
-            preview.MouseButton1Click:Connect(function() popup.Visible = not popup.Visible end)
+            preview.MouseButton1Click:Connect(function()
+                popup.Visible = not popup.Visible
+                if popup.Visible then
+                    -- position popup near preview
+                    local abs = preview.AbsolutePosition
+                    popup.Position = UDim2.new(0, abs.X + 50, 0, abs.Y)
+                end
+            end)
 
             RunService.RenderStepped:Connect(function()
                 if popup.Visible then
@@ -583,7 +653,7 @@ function library:addTab(name)
             return preview
         end
 
-        -- addDivider
+        -- divider
         function group:addDivider()
             local d = Instance.new("Frame", groupFrame)
             d.BackgroundColor3 = Color3.fromRGB(30,30,34)
@@ -598,11 +668,12 @@ function library:addTab(name)
     return tabObj
 end
 
--- Config helpers (files)
+-- config helpers
 local function ensureFolders()
-    if not isfolder then return end
+    if not isfolder then return false end
     if not isfolder("alora") then pcall(makefolder,"alora") end
-    if not isfolder("alora/"..tostring(game.GameId)) then pcall(makefolder, "alora/"..tostring(game.GameId)) end
+    if not isfolder("alora/"..tostring(game.GameId)) then pcall(makefolder,"alora/"..tostring(game.GameId)) end
+    return true
 end
 
 function library:refreshConfigs()
@@ -628,10 +699,10 @@ function library:saveConfig()
     local dump = {}
     for k,v in pairs(library.flags) do
         local o = library.options[k]
-        if o and o.skipflag then -- skip
+        if o and o.skipflag then
         else
-            if typeof(v)=="Color3" then dump[k] = {"Color3", v.R, v.G, v.B}
-            elseif typeof(v)=="EnumItem" then dump[k] = {"EnumItem", tostring(v.EnumType):match("Enum%.(.+)"), v.Name}
+            if typeof(v)=="Color3" then dump[k]={"Color3", v.R, v.G, v.B}
+            elseif typeof(v)=="EnumItem" then dump[k]={"EnumItem", tostring(v.EnumType):match("Enum%.(.+)"), v.Name}
             else dump[k] = v end
         end
     end
@@ -667,8 +738,9 @@ function library:deleteConfig()
     local name = library.flags["selected_config"]
     if not name or name=="" then library:notify("Selecione config"); return end
     local path = "alora/"..tostring(game.GameId).."/"..name..".cfg"
-    if isfile and isfile(path) then pcall(delfile, path); library:notify("Deletado: "..name); library:refreshConfigs() else library:notify("Config não encontrada") end
+    if isfile and isfile(path) then pcall(delfile, path); library:notify("Deletado: "..name); library:refreshConfigs()
+    else library:notify("Config não encontrada") end
 end
 
--- Return library for Alora script
+-- return
 return library, menu, tabholder
